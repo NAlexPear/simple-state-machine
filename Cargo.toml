@@ -1,0 +1,10 @@
+[package]
+name = "simple-state-machine"
+version = "0.1.0"
+authors = ["Alex Pearson <alex@alexpear.com>"]
+
+[dependencies]
+
+
+[dependencies.stdweb]
+version = "0.3"
