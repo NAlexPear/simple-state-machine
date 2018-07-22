@@ -1,35 +1,22 @@
-#![recursion_limit="500"]
-
 #[macro_use]
 extern crate stdweb;
 
-use stdweb::web::{
-    Element,
-    document
-};
+use stdweb::web::{document};
 use stdweb::web::event::ClickEvent;
 use stdweb::traits::*;
 
-
-macro_rules! enclose {
-    ( ($( $x:ident ),*) $y:expr ) => {
-        {
-            $(let $x = $x.clone();)*
-            $y
-        }
-    };
-}
-
+type Listener = fn(Store) -> ();
 type Reducer = fn(State) -> State;
-type Handler = fn() -> Reducer;
 
+#[derive(Debug, Copy, Clone)]
 struct State {
     count: i32,
 }
 
+#[derive(Debug,Clone)]
 struct Store {
     state: State,
-    subscribers: Vec<Reducer>
+    subscribers: Vec<Box<Listener>>
 }
 
 impl Store {
@@ -40,15 +27,28 @@ impl Store {
         }
     }
 
-    fn subscribe(&mut self, reducer: Reducer) -> () {
-        self.subscribers.push(reducer);
+    fn get_state(&self) -> State {
+        self.state.clone()
+    }
+
+    fn dispatch(&mut self, reducer: &Reducer) -> () {
+        self.state = reducer(self.get_state());
+
+        for sub in &self.subscribers {
+            let new_state = self.clone();
+
+            sub(new_state);
+        }
+    }
+
+    fn subscribe(&mut self, listener: Listener) -> () {
+        self.subscribers.push(Box::new(listener));
     }
 }
 
 struct Event {
-    event: String,
     selector: String,
-    handler: Handler
+    handler: Reducer
 }
 
 struct View {
@@ -60,19 +60,12 @@ fn increment_reducer(state:State) -> State {
     State { count: state.count + 1 }
 }
 
-fn increment_handler() -> Reducer {
-    increment_reducer
-}
-
 fn decrement_reducer(state:State) -> State {
     State { count: state.count - 1 }
 }
 
-fn decrement_handler() -> Reducer {
-    decrement_reducer
-}
-
-fn view(state: State) -> View {
+fn view(store: &Store) -> View {
+    let state = store.get_state();
     let html = format!("
         <h1>Click the buttons below!</h1>
         <button id=\"increment\" type=\"button\">+</button>
@@ -81,15 +74,13 @@ fn view(state: State) -> View {
     ", count = state.count);
 
     let increment = Event {
-        event: String::from("click"),
         selector: String::from("#increment"),
-        handler: increment_handler
+        handler: increment_reducer
     };
 
     let decrement = Event {
-        event: String::from("click"),
         selector: String::from("#decrement"),
-        handler: decrement_handler
+        handler: decrement_reducer
     };
 
     View {
@@ -98,25 +89,24 @@ fn view(state: State) -> View {
     }
 }
 
-fn add_listeners(events: Vec<Event>){
+fn add_listeners(events: Vec<Event>, store: Store) -> () {
     for event in events {
-        document()
+        let mut new_store = store.clone();
+        let element = document()
             .query_selector(&event.selector)
             .unwrap()
-            .unwrap()
-            .add_event_listener(|_event: ClickEvent| {
-                console!(log, "Something was Clicked");
+            .unwrap();
 
+        let listener = move |_event: ClickEvent| {
+            new_store.dispatch(&event.handler);
+        };
 
-            });
+        element.add_event_listener(listener);
     }
 }
 
-
-fn main() {
-    let state = State { count: 0 };
-    let store = Store::new(state);
-    let initial_view = view(store.state);
+fn render(store: Store) {
+    let initial_view = view(&store);
     let root = document()
         .get_element_by_id("root")
         .unwrap();
@@ -126,6 +116,14 @@ fn main() {
         @{ root }.innerHTML = @{ initial_view.html };
     };
 
+    add_listeners(initial_view.events, store);
+}
 
-    add_listeners(initial_view.events);
+fn main() {
+    let state = State { count: 0 };
+    let mut store = Store::new(state);
+
+    store.subscribe(render);
+
+    render(store);
 }
